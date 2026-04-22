@@ -1,6 +1,6 @@
 """
-彩票学习工具 - 完全确定性版 Web 界面
-所有预测结果由输入日期和历史记录唯一决定。
+彩票学习工具 - 完全确定性版 Web 界面（支持彩票类型）
+同一时间 + 同一彩票类型 → 完全相同的结果
 声明：仅供编程学习与传统文化研究，严禁用于赌博。
 """
 
@@ -331,6 +331,7 @@ class HistoryManager:
             draw_numbers TEXT,
             match_count INTEGER,
             prize_level TEXT,
+            lottery_type TEXT,
             solar_date TEXT,
             lunar_date TEXT,
             ganzhi TEXT,
@@ -350,7 +351,7 @@ class HistoryManager:
         c = conn.cursor()
         c.execute('''SELECT id, draw_time, strategy, user_numbers, draw_numbers, 
                      match_count, prize_level, solar_date, lunar_date, ganzhi, 
-                     nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi 
+                     nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi, lottery_type 
                      FROM records ORDER BY id DESC LIMIT ?''', (limit,))
         rows = c.fetchall()
         conn.close()
@@ -392,7 +393,7 @@ class AncientDivination:
     
     @staticmethod
     def zhouyi(dt, seed_str):
-        seed = dt.strftime("%Y%m%d")
+        seed = dt.strftime("%Y%m%d") + "_" + seed_str.split("_")[-1] if "_" in seed_str else dt.strftime("%Y%m%d")
         hash_val = deterministic_index(seed, 64)
         wuxing_list = ['金', '木', '水', '火', '土']
         wuxing = wuxing_list[deterministic_index(seed + "wuxing", 5)]
@@ -469,7 +470,7 @@ def main():
     # 初始化数据库
     HistoryManager.init_db()
     
-    # 侧边栏 - 时间选择
+    # 侧边栏 - 时间和彩票类型选择
     st.sidebar.header("⏰ 时间设置")
     
     # 日期选择
@@ -483,10 +484,26 @@ def main():
     current_dt = datetime.combine(selected_date, datetime.min.time())
     current_dt = current_dt.replace(hour=selected_hour, minute=selected_minute)
     
-    # 生成种子字符串（确定性核心）
-    seed_str = current_dt.strftime("%Y%m%d%H%M%S")
+    # 彩票类型选择
+    st.sidebar.header("🎰 彩票类型")
+    lottery_type_option = st.sidebar.radio(
+        "选择彩票类型",
+        ["默认", "自定义1", "自定义2", "自定义3", "自定义标识符"],
+        index=0
+    )
+    
+    if lottery_type_option == "默认":
+        lottery_type = "default"
+    elif lottery_type_option == "自定义标识符":
+        lottery_type = st.sidebar.text_input("输入标识符", value="双色球")
+    else:
+        lottery_type = lottery_type_option.lower().replace("自定义", "custom")
+    
+    # 生成种子字符串（确定性核心：时间 + 彩票类型）
+    seed_str = current_dt.strftime("%Y%m%d%H%M%S") + "_" + lottery_type
     
     st.sidebar.markdown(f"**当前时间：** {current_dt.strftime('%Y-%m-%d %H:%M')}")
+    st.sidebar.markdown(f"**彩票类型：** {lottery_type}")
     st.sidebar.markdown(f"**种子：** `{seed_str}`")
     
     # 功能选项卡
@@ -498,7 +515,7 @@ def main():
     # Tab 1: 平衡选号
     with tab1:
         st.header("平衡选号（确定性）")
-        st.markdown("基于选定时间生成唯一确定的平衡号码组合")
+        st.markdown("基于选定时间和彩票类型生成唯一确定的平衡号码组合")
         
         if st.button("生成平衡号码", key="balance_btn"):
             nums = BalanceFilter.generate_balanced(seed_str)
@@ -521,7 +538,7 @@ def main():
             st.markdown(f"- 奇偶比：{odd_cnt}:{7-odd_cnt}")
             st.markdown(f"- 大小比：{7-small_cnt}:{small_cnt}")
             st.markdown(f"- 和值：{total}")
-            st.info("💡 相同的时间选择将永远得到相同的预测结果")
+            st.info(f"💡 相同的时间({current_dt.strftime('%Y-%m-%d %H:%M')}) + 相同的彩票类型({lottery_type}) 将永远得到相同的预测结果")
     
     # Tab 2: 聪明组合
     with tab2:
@@ -603,7 +620,7 @@ def main():
             st.markdown(f"### {', '.join(map(str, nums))}")
             st.text(NumberAttributes.format_number_list(nums, year))
             st.markdown(f"**推理依据：** {reason}")
-            st.info("💡 相同的时间选择将永远得到相同的预测结果")
+            st.info(f"💡 相同的时间({current_dt.strftime('%Y-%m-%d %H:%M')}) + 相同的彩票类型({lottery_type}) 将永远得到相同的预测结果")
     
     # Tab 6: 历史记录
     with tab6:
@@ -629,9 +646,9 @@ def main():
             for row in rows:
                 (rid, draw_time, strategy, user_str, draw_str, 
                  match_cnt, prize, solar, lunar, ganzhi, nayin, 
-                 zhishen, jianchu, main_hex, changing_hex, hour_ganzhi) = row
+                 zhishen, jianchu, main_hex, changing_hex, hour_ganzhi, lottery_type_row) = row
                 
-                with st.expander(f"期号 {rid} - {draw_time}"):
+                with st.expander(f"期号 {rid} - {draw_time} ({lottery_type_row})"):
                     st.markdown(f"**策略：** {strategy}")
                     if user_str:
                         st.markdown(f"**投注号码：** {user_str}")
@@ -648,7 +665,8 @@ def main():
     st.markdown("""
     <div style="text-align: center; color: #888;">
         📌 本工具为完全确定性版本<br>
-        相同的日期和时间选择将永远得到相同的预测结果<br>
+        同一时间 + 同一彩票类型 → 完全相同的结果<br>
+        不同彩票类型 → 结果不同<br>
         声明：仅供编程学习与传统文化研究，严禁用于赌博
     </div>
     """, unsafe_allow_html=True)

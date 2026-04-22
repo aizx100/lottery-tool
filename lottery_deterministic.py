@@ -1,6 +1,6 @@
 """
-彩票学习工具 - 完全确定性版（无任何随机，基于历史+日期）
-所有预测结果由输入日期和历史记录唯一决定。
+彩票学习工具 - 完全确定性版（支持彩票类型）
+特点：同一时间 + 同一彩票类型 → 完全相同的结果；不同彩票类型 → 结果不同。
 声明：仅供编程学习与传统文化研究，严禁用于赌博。
 """
 
@@ -13,19 +13,45 @@ from collections import Counter, defaultdict
 
 DB_FILE = "lottery_history.db"
 
-# ==================== 辅助函数：确定性哈希 ====================
+# ==================== 辅助函数 ====================
 def deterministic_index(seed_str, max_val):
     """根据种子字符串返回0到max_val-1之间的确定性整数"""
     hash_val = int(hashlib.md5(seed_str.encode()).hexdigest(), 16)
     return hash_val % max_val
 
-def deterministic_sample(population, k, seed_str):
-    """基于种子的确定性抽样（返回排序后的列表）"""
-    if k > len(population):
-        return sorted(population)
-    indexed = [(deterministic_index(seed_str + str(item), len(population)), item) for item in population]
-    indexed.sort(key=lambda x: x[0])
-    return sorted([item for _, item in indexed[:k]])
+def get_all_balanced_combinations():
+    """预计算所有符合平衡条件的组合（缓存）"""
+    if not hasattr(get_all_balanced_combinations, 'cache'):
+        from itertools import combinations
+        all_nums = range(1, 50)
+        cache = []
+        for combo in combinations(all_nums, 7):
+            if BalanceFilter.is_balanced(list(combo)):
+                cache.append(sorted(combo))
+        get_all_balanced_combinations.cache = cache
+    return get_all_balanced_combinations.cache
+
+def get_lottery_type():
+    """交互式获取彩票类型，返回字符串标识"""
+    print("\n请选择彩票类型：")
+    print("1. 默认")
+    print("2. 自定义1")
+    print("3. 自定义2")
+    print("4. 自定义3")
+    print("5. 手动输入标识符")
+    opt = input("请选择(1-5): ")
+    if opt == '1':
+        return "default"
+    elif opt == '2':
+        return "custom1"
+    elif opt == '3':
+        return "custom2"
+    elif opt == '4':
+        return "custom3"
+    elif opt == '5':
+        return input("请输入标识符（如：双色球、大乐透等）: ").strip() or "manual"
+    else:
+        return "default"
 
 # ==================== 时柱干支 ====================
 def get_hour_ganzhi(year_gan, month_gan, day_gan, hour):
@@ -54,7 +80,7 @@ def get_hour_ganzhi(year_gan, month_gan, day_gan, hour):
         dz_index = 10
     else:
         dz_index = 11
-    
+    dz = dizhi[dz_index]
     tiangan = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸']
     start_map = {
         '甲': '甲', '己': '甲',
@@ -67,9 +93,9 @@ def get_hour_ganzhi(year_gan, month_gan, day_gan, hour):
     start_index = tiangan.index(start_gan)
     tg_index = (start_index + dz_index) % 10
     tg = tiangan[tg_index]
-    return f"{tg}{dizhi[dz_index]}"
+    return f"{tg}{dz}"
 
-# ==================== 模块1：平衡选号（确定性） ====================
+# ==================== 模块1：平衡选号 ====================
 class BalanceFilter:
     TOTAL = 49
     PICK = 7
@@ -111,27 +137,13 @@ class BalanceFilter:
     
     @staticmethod
     def generate_balanced(seed_str):
-        """从所有平衡组合中，根据种子字符串选一个固定组合"""
-        all_combos = BalanceFilter.get_all_balanced()
+        all_combos = get_all_balanced_combinations()
         if not all_combos:
             return list(range(1, 8))
         idx = deterministic_index(seed_str, len(all_combos))
         return all_combos[idx]
-    
-    @staticmethod
-    def get_all_balanced():
-        """预计算所有符合平衡条件的组合"""
-        if not hasattr(BalanceFilter, '_cache'):
-            from itertools import combinations
-            all_nums = range(1, 50)
-            cache = []
-            for combo in combinations(all_nums, 7):
-                if BalanceFilter.is_balanced(list(combo)):
-                    cache.append(sorted(combo))
-            BalanceFilter._cache = cache
-        return BalanceFilter._cache
 
-# ==================== 模块2：聪明组合（确定性） ====================
+# ==================== 模块2：聪明组合 ====================
 class WheelGenerator:
     @staticmethod
     def generate(pool, pick=7, guarantee=4, seed_str=""):
@@ -271,25 +283,14 @@ class ChineseCalendar:
             info["hour_ganzhi"] = hour_ganzhi
             return info
         else:
-            weekday_names = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
             return {
                 "solar_date": dt.isoformat(),
-                "weekday": weekday_names[dt.weekday()],
-                "lunar_date": "需安装 lunar-python 库",
-                "zodiac": "马" if (dt.year - 2026) % 12 == 0 else "待计算",
-                "yi": ["待查询"],
-                "ji": ["待查询"],
-                "chong": "待查询",
-                "sha": "待查询",
-                "wuxing": "待查询",
-                "zhishen": "待查询",
-                "jianchu": "待查询",
-                "tai_shen": "待查询",
-                "pengzu": "待查询",
-                "ji_shen": "待查询",
-                "xiong_shen": "待查询",
-                "ganzhi": "待查询",
-                "nayin": "待查询",
+                "lunar_date": "需安装 lunar-python",
+                "ganzhi": "",
+                "nayin": "",
+                "zhishen": "",
+                "jianchu": "",
+                "wuxing": "",
                 "hour_ganzhi": ""
             }
     
@@ -314,7 +315,7 @@ class ChineseCalendar:
         lines.append("="*40)
         return "\n".join(lines)
 
-# ==================== 模块6：历史记录管理 ====================
+# ==================== 模块6：历史记录管理（增加彩票类型字段） ====================
 class HistoryManager:
     @staticmethod
     def init_db():
@@ -327,7 +328,8 @@ class HistoryManager:
             user_numbers TEXT,
             draw_numbers TEXT,
             match_count INTEGER,
-            prize_level TEXT
+            prize_level TEXT,
+            lottery_type TEXT
         )''')
         conn.commit()
         
@@ -342,11 +344,16 @@ class HistoryManager:
                 c.execute(f"ALTER TABLE records ADD COLUMN {col_def}")
             except sqlite3.OperationalError:
                 pass
+        
+        try:
+            c.execute("ALTER TABLE records ADD COLUMN lottery_type TEXT")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
         conn.close()
     
     @staticmethod
-    def save_record(strategy, user_nums, draw_nums, match_count, prize_level, draw_datetime=None):
+    def save_record(strategy, user_nums, draw_nums, match_count, prize_level, draw_datetime=None, lottery_type="default"):
         if draw_datetime is None:
             draw_datetime = datetime.now()
         draw_time_str = draw_datetime.strftime("%Y-%m-%d %H:%M:%S")
@@ -366,14 +373,14 @@ class HistoryManager:
         c = conn.cursor()
         user_str = ','.join(map(str, user_nums))
         draw_str = ','.join(map(str, draw_nums))
-        c.execute('''INSERT INTO records (draw_time, strategy, user_numbers, draw_numbers, match_count, prize_level, solar_date, lunar_date, ganzhi, nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                  (draw_time_str, strategy, user_str, draw_str, match_count, prize_level, solar_date, lunar_date, ganzhi, nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi))
+        c.execute('''INSERT INTO records (draw_time, strategy, user_numbers, draw_numbers, match_count, prize_level, solar_date, lunar_date, ganzhi, nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi, lottery_type)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                  (draw_time_str, strategy, user_str, draw_str, match_count, prize_level, solar_date, lunar_date, ganzhi, nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi, lottery_type))
         conn.commit()
         conn.close()
     
     @staticmethod
-    def add_custom_record(draw_datetime, draw_numbers, strategy="自定义"):
+    def add_custom_record(draw_datetime, draw_numbers, strategy="自定义", lottery_type="default"):
         if len(set(draw_numbers)) != 7 or any(n<1 or n>49 for n in draw_numbers):
             raise ValueError("开奖号码必须是7个1-49之间不重复的数字")
         user_nums = []
@@ -396,9 +403,9 @@ class HistoryManager:
         c = conn.cursor()
         user_str = ','.join(map(str, user_nums)) if user_nums else ""
         draw_str = ','.join(map(str, draw_numbers))
-        c.execute('''INSERT INTO records (draw_time, strategy, user_numbers, draw_numbers, match_count, prize_level, solar_date, lunar_date, ganzhi, nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                  (draw_time_str, strategy, user_str, draw_str, match_count, prize_level, solar_date, lunar_date, ganzhi, nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi))
+        c.execute('''INSERT INTO records (draw_time, strategy, user_numbers, draw_numbers, match_count, prize_level, solar_date, lunar_date, ganzhi, nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi, lottery_type)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                  (draw_time_str, strategy, user_str, draw_str, match_count, prize_level, solar_date, lunar_date, ganzhi, nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi, lottery_type))
         conn.commit()
         conn.close()
     
@@ -406,7 +413,7 @@ class HistoryManager:
     def get_recent(limit=10):
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        c.execute('''SELECT id, draw_time, strategy, user_numbers, draw_numbers, match_count, prize_level, solar_date, lunar_date, ganzhi, nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi FROM records ORDER BY id DESC LIMIT ?''', (limit,))
+        c.execute('''SELECT id, draw_time, strategy, user_numbers, draw_numbers, match_count, prize_level, solar_date, lunar_date, ganzhi, nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi, lottery_type FROM records ORDER BY id DESC LIMIT ?''', (limit,))
         rows = c.fetchall()
         conn.close()
         return rows
@@ -415,7 +422,7 @@ class HistoryManager:
     def get_all_records():
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        c.execute("SELECT strategy, user_numbers, draw_numbers FROM records WHERE user_numbers != ''")
+        c.execute("SELECT strategy, user_numbers, draw_numbers, lottery_type FROM records WHERE user_numbers != ''")
         rows = c.fetchall()
         conn.close()
         return rows
@@ -433,7 +440,7 @@ class HistoryManager:
     
     @staticmethod
     def format_record(row):
-        (rid, draw_time, strategy, user_str, draw_str, match_cnt, prize, solar, lunar, ganzhi, nayin, zhishen, jianchu, main_hex, changing_hex, hour_ganzhi) = row
+        (rid, draw_time, strategy, user_str, draw_str, match_cnt, prize, solar, lunar, ganzhi, nayin, zhishen, jianchu, main_hex, changing_hex, hour_ganzhi, lottery_type) = row
         user_nums = list(map(int, user_str.split(','))) if user_str else []
         draw_nums = list(map(int, draw_str.split(',')))
         try:
@@ -446,7 +453,7 @@ class HistoryManager:
             f"四柱八字：{ganzhi} {hour_ganzhi}",
             f"纳音：{nayin} 值神：{zhishen} 建除：{jianchu}",
             f"主卦：{main_hex} 变卦：{changing_hex}",
-            f"策略：{strategy}",
+            f"策略：{strategy} 彩票类型：{lottery_type}",
         ]
         if user_nums:
             lines.append(f"投注号码：{NumberAttributes.format_number_list(user_nums, draw_year)}")
@@ -458,11 +465,11 @@ class HistoryManager:
         lines.append("-"*40)
         return "\n".join(lines)
 
-# ==================== 模块7：达尔文预测（完全确定性） ====================
+# ==================== 模块7：达尔文预测 ====================
 class DarwinPrediction:
     @staticmethod
-    def get_number_attrs(num, year=None):
-        attrs = NumberAttributes.get_full_attrs(num, year)
+    def get_number_attrs(num):
+        attrs = NumberAttributes.get_full_attrs(num)
         return {
             'zodiac': attrs['zodiac'],
             'wuxing': attrs['wuxing'],
@@ -474,8 +481,8 @@ class DarwinPrediction:
         }
     
     @staticmethod
-    def get_group_attrs(numbers, year=None):
-        attrs_list = [DarwinPrediction.get_number_attrs(n, year) for n in numbers]
+    def get_group_attrs(numbers):
+        attrs_list = [DarwinPrediction.get_number_attrs(n) for n in numbers]
         odd_cnt = sum(1 for a in attrs_list if a['parity'] == '奇')
         even_cnt = 7 - odd_cnt
         small_cnt = sum(1 for a in attrs_list if a['size'] == '小')
@@ -518,10 +525,10 @@ class DarwinPrediction:
         return score
     
     @staticmethod
-    def get_history_records(limit=50):
+    def get_history_records(limit=50, lottery_type="default"):
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        c.execute("SELECT user_numbers, draw_numbers FROM records WHERE user_numbers != '' ORDER BY id DESC LIMIT ?", (limit,))
+        c.execute("SELECT user_numbers, draw_numbers FROM records WHERE user_numbers != '' AND lottery_type=? ORDER BY id DESC LIMIT ?", (lottery_type, limit))
         rows = c.fetchall()
         conn.close()
         history = []
@@ -539,11 +546,10 @@ class DarwinPrediction:
         return history
     
     @staticmethod
-    def predict(current_numbers, seed_str="", year=None):
-        if year is None:
-            year = datetime.now().year
-        current_attrs = DarwinPrediction.get_group_attrs(current_numbers, year)
-        history = DarwinPrediction.get_history_records(100)
+    def predict(current_numbers, seed_str=""):
+        lottery_type = seed_str.split("_")[-1] if "_" in seed_str else "default"
+        current_attrs = DarwinPrediction.get_group_attrs(current_numbers)
+        history = DarwinPrediction.get_history_records(100, lottery_type)
         if len(history) < 3:
             return BalanceFilter.generate_balanced(seed_str), ["历史记录不足，使用平衡选号"]
         
@@ -555,14 +561,14 @@ class DarwinPrediction:
         next_attrs_counter = defaultdict(Counter)
         for _, rec in most_similar:
             for num in rec['draw']:
-                attrs = DarwinPrediction.get_number_attrs(num, year)
+                attrs = DarwinPrediction.get_number_attrs(num)
                 for key, val in attrs.items():
                     next_attrs_counter[key][val] += 1
         
         diff_next_attrs_counter = defaultdict(Counter)
         for _, rec in least_similar:
             for num in rec['draw']:
-                attrs = DarwinPrediction.get_number_attrs(num, year)
+                attrs = DarwinPrediction.get_number_attrs(num)
                 for key, val in attrs.items():
                     diff_next_attrs_counter[key][val] += 1
         
@@ -576,7 +582,7 @@ class DarwinPrediction:
         
         scores = {}
         for num in range(1, 50):
-            attrs = DarwinPrediction.get_number_attrs(num, year)
+            attrs = DarwinPrediction.get_number_attrs(num)
             score = 0
             for key, val in attrs.items():
                 score += combined[key].get(val, 0)
@@ -593,9 +599,10 @@ class DarwinPrediction:
             print("2. 手动输入7个号码")
             choice = input("选择(1/2): ")
             if choice == '1':
+                lottery_type = seed_str.split("_")[-1] if "_" in seed_str else "default"
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
-                c.execute("SELECT draw_numbers FROM records WHERE draw_numbers != '' ORDER BY id DESC LIMIT 1")
+                c.execute("SELECT draw_numbers FROM records WHERE draw_numbers != '' AND lottery_type=? ORDER BY id DESC LIMIT 1", (lottery_type,))
                 row = c.fetchone()
                 conn.close()
                 if row:
@@ -622,7 +629,7 @@ class DarwinPrediction:
         for r in reasons:
             print(f" - {r}")
 
-# ==================== 模块8：古代术数预测（完全确定性） ====================
+# ==================== 模块8：古代术数预测（支持彩票类型） ====================
 class AncientDivination:
     @staticmethod
     def _get_datetime_from_user():
@@ -662,8 +669,7 @@ class AncientDivination:
         if len(pool) < 7:
             missing = [n for n in range(1,50) if n not in pool]
             needed = 7 - len(pool)
-            seed = seed_str + "meihua"
-            missing_sorted = sorted(missing, key=lambda x: deterministic_index(seed + str(x), len(missing)))
+            missing_sorted = sorted(missing, key=lambda x: deterministic_index(seed_str + str(x), len(missing)))
             pool.update(missing_sorted[:needed])
         
         pool_list = sorted(pool)
@@ -680,7 +686,7 @@ class AncientDivination:
     
     @staticmethod
     def zhouyi(dt, seed_str):
-        seed = dt.strftime("%Y%m%d")
+        seed = dt.strftime("%Y%m%d") + "_" + seed_str.split("_")[-1] if "_" in seed_str else dt.strftime("%Y%m%d")
         hash_val = deterministic_index(seed, 64)
         gua_index = hash_val + 1
         wuxing_list = ['金','木','水','火','土']
@@ -798,7 +804,8 @@ class AncientDivination:
         print("5. 随机一种")
         choice = input("请选择(1-5): ")
         dt = AncientDivination._get_datetime_from_user()
-        seed_str = dt.strftime("%Y%m%d%H%M%S")
+        lottery_type = get_lottery_type()
+        seed_str = dt.strftime("%Y%m%d%H%M%S") + "_" + lottery_type
         if choice == '1':
             nums, reason = AncientDivination.meihua_yishu(dt, seed_str)
             method = "梅花易数"
@@ -820,14 +827,14 @@ class AncientDivination:
         print(f"推理依据：{reason}")
         print("（注：本预测仅为编程模拟，不具实际效力）")
 
-# ==================== 模块9：智能预测员（完全确定性） ====================
+# ==================== 模块9：智能预测员 ====================
 class SmartPredictor:
     STRATEGIES = {
-        "平衡选号": lambda seed, dt: BalanceFilter.generate_balanced(seed),
-        "梅花易数": lambda seed, dt: AncientDivination.meihua_yishu(dt, seed)[0],
-        "周易": lambda seed, dt: AncientDivination.zhouyi(dt, seed)[0],
-        "奇门遁甲": lambda seed, dt: AncientDivination.qimen_dunjia(dt, seed)[0],
-        "紫微斗数": lambda seed, dt: AncientDivination.ziwei_doushu(dt, seed)[0],
+        "平衡选号": lambda seed: BalanceFilter.generate_balanced(seed),
+        "梅花易数": lambda seed: AncientDivination.meihua_yishu(datetime.now(), seed)[0],
+        "周易": lambda seed: AncientDivination.zhouyi(datetime.now(), seed)[0],
+        "奇门遁甲": lambda seed: AncientDivination.qimen_dunjia(datetime.now(), seed)[0],
+        "紫微斗数": lambda seed: AncientDivination.ziwei_doushu(datetime.now(), seed)[0],
     }
     
     custom_preferences = {
@@ -881,11 +888,11 @@ class SmartPredictor:
         print("偏好已更新。")
     
     @classmethod
-    def compute_strategy_weights(cls):
+    def compute_strategy_weights(cls, lottery_type="default"):
         records = HistoryManager.get_all_records()
         strategy_hits = defaultdict(list)
-        for strategy, user_str, draw_str in records:
-            if not user_str:
+        for strategy, user_str, draw_str, rec_type in records:
+            if not user_str or rec_type != lottery_type:
                 continue
             user_nums = set(map(int, user_str.split(',')))
             draw_nums = set(map(int, draw_str.split(',')))
@@ -902,9 +909,8 @@ class SmartPredictor:
         return weights
     
     @classmethod
-    def apply_preferences(cls, number, year=None):
-        if year is None:
-            year = datetime.now().year
+    def apply_preferences(cls, number):
+        year = datetime.now().year
         attrs = NumberAttributes.get_full_attrs(number, year)
         if number in cls.custom_preferences['exclude_numbers']:
             return False
@@ -928,10 +934,10 @@ class SmartPredictor:
     def predict(cls, dt=None):
         if dt is None:
             dt = datetime.now()
-        seed_str = dt.strftime("%Y%m%d%H%M%S")
-        year = dt.year
-        print(f"\n【智能预测员】使用时间种子字符串 '{seed_str}' 进行确定性预测...")
-        weights = cls.compute_strategy_weights()
+        lottery_type = get_lottery_type()
+        seed_str = dt.strftime("%Y%m%d%H%M%S") + "_" + lottery_type
+        print(f"\n【智能预测员】使用时间种子 '{seed_str}' 进行确定性预测...")
+        weights = cls.compute_strategy_weights(lottery_type)
         print("各策略当前权重（基于历史表现）：")
         for strat, w in sorted(weights.items(), key=lambda x: -x[1]):
             print(f" {strat}: {w:.2f}")
@@ -939,7 +945,7 @@ class SmartPredictor:
         all_recommendations = []
         for strat_name, func in cls.STRATEGIES.items():
             try:
-                nums = func(seed_str + strat_name, dt)
+                nums = func(seed_str + strat_name)
                 all_recommendations.append((strat_name, nums, weights[strat_name]))
             except Exception as e:
                 print(f"策略 {strat_name} 执行失败: {e}")
@@ -951,7 +957,7 @@ class SmartPredictor:
                 score_counter[num] += weight
         
         for num in range(1, 50):
-            if not cls.apply_preferences(num, year):
+            if not cls.apply_preferences(num):
                 score_counter[num] *= 0.1
             else:
                 score_counter[num] *= 1.2
@@ -963,8 +969,8 @@ class SmartPredictor:
             top_nums.extend(missing[:7-len(top_nums)])
         final_numbers = sorted(top_nums[:7])
         print("\n【智能预测员综合结果】")
-        print(f"最终推荐号码：{NumberAttributes.format_number_list(final_numbers, year)}")
-        print(f"使用时间：{dt.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"最终推荐号码：{NumberAttributes.format_number_list(final_numbers, dt.year)}")
+        print(f"使用时间：{dt.strftime('%Y-%m-%d %H:%M:%S')} 彩票类型：{lottery_type}")
         print("\n各策略推荐详情：")
         for strat_name, nums, weight in all_recommendations:
             print(f" {strat_name} (权重{weight:.2f}) : {sorted(nums)}")
@@ -1042,17 +1048,23 @@ class SmartAssistant:
             SmartPredictor.update_preferences()
             return
         if re.search(r'预测|达尔文|帮我预测', text):
-            DarwinPrediction.query_prediction()
+            lottery_type = get_lottery_type()
+            seed_str = datetime.now().strftime("%Y%m%d%H%M%S") + "_" + lottery_type
+            DarwinPrediction.query_prediction(seed_str=seed_str)
             return
         if re.search(r'平衡选号|生成平衡号码', text):
-            nums = BalanceFilter.generate_balanced(datetime.now().strftime("%Y%m%d%H%M%S"))
+            lottery_type = get_lottery_type()
+            seed_str = datetime.now().strftime("%Y%m%d%H%M%S") + "_" + lottery_type
+            nums = BalanceFilter.generate_balanced(seed_str)
             print(f"平衡号码: {NumberAttributes.format_number_list(nums, datetime.now().year)}")
             return
         if re.search(r'聪明组合', text):
             numbers = re.findall(r'\d+', text)
             if len(numbers) >= 7:
                 pool = list(map(int, numbers))
-                wheel = WheelGenerator.generate(pool, 7, 4, seed_str=datetime.now().strftime("%Y%m%d%H%M%S"))
+                lottery_type = get_lottery_type()
+                seed_str = datetime.now().strftime("%Y%m%d%H%M%S") + "_" + lottery_type
+                wheel = WheelGenerator.generate(pool, 7, 4, seed_str=seed_str)
                 print(f"从 {len(pool)} 个候选号中生成了 {len(wheel)} 注聪明组合：")
                 for i, w in enumerate(wheel, 1):
                     print(f" 注{i}: {NumberAttributes.format_number_list(w, datetime.now().year)}")
@@ -1068,15 +1080,17 @@ class SmartAssistant:
                 strat_key = '随机'
             draw = generate_random_numbers()
             print(f"开奖号码: {NumberAttributes.format_number_list(draw, datetime.now().year)}")
+            lottery_type = get_lottery_type()
+            seed_str = datetime.now().strftime("%Y%m%d%H%M%S") + "_" + lottery_type
             if strat_key == '平衡':
-                user = BalanceFilter.generate_balanced(datetime.now().strftime("%Y%m%d%H%M%S"))
+                user = BalanceFilter.generate_balanced(seed_str)
                 strat = "平衡选号"
             elif strat_key == '聪明':
                 print("请先输入候选号码池（空格分隔）:")
                 try:
                     pool = list(map(int, input().split()))
                     if len(pool) >= 7:
-                        wheel = WheelGenerator.generate(pool, 7, 4, seed_str=datetime.now().strftime("%Y%m%d%H%M%S"))
+                        wheel = WheelGenerator.generate(pool, 7, 4, seed_str=seed_str)
                         user = wheel[0] if wheel else generate_random_numbers()
                         strat = f"聪明组合(候选池{len(pool)}个)"
                     else:
@@ -1092,7 +1106,7 @@ class SmartAssistant:
             match_cnt = check_match(user, draw)
             prize = prize_level(match_cnt)
             print(f"匹配个数: {match_cnt} -> {prize}")
-            HistoryManager.save_record(strat, user, draw, match_cnt, prize, datetime.now())
+            HistoryManager.save_record(strat, user, draw, match_cnt, prize, datetime.now(), lottery_type)
             print("记录已保存。")
             return
         if re.search(r'历史记录|历史$', text):
@@ -1137,25 +1151,29 @@ class SmartAssistant:
             return
         if re.search(r'梅花易数', text):
             dt = datetime.now()
-            seed_str = dt.strftime("%Y%m%d%H%M%S")
+            lottery_type = get_lottery_type()
+            seed_str = dt.strftime("%Y%m%d%H%M%S") + "_" + lottery_type
             nums, reason = AncientDivination.meihua_yishu(dt, seed_str)
             print(f"\n【梅花易数预测结果】\n推荐号码：{NumberAttributes.format_number_list(nums, dt.year)}\n推理依据：{reason}")
             return
         if re.search(r'周易(?!.*起卦)', text):
             dt = datetime.now()
-            seed_str = dt.strftime("%Y%m%d%H%M%S")
+            lottery_type = get_lottery_type()
+            seed_str = dt.strftime("%Y%m%d%H%M%S") + "_" + lottery_type
             nums, reason = AncientDivination.zhouyi(dt, seed_str)
             print(f"\n【周易预测结果】\n推荐号码：{NumberAttributes.format_number_list(nums, dt.year)}\n推理依据：{reason}")
             return
         if re.search(r'奇门遁甲', text):
             dt = datetime.now()
-            seed_str = dt.strftime("%Y%m%d%H%M%S")
+            lottery_type = get_lottery_type()
+            seed_str = dt.strftime("%Y%m%d%H%M%S") + "_" + lottery_type
             nums, reason = AncientDivination.qimen_dunjia(dt, seed_str)
             print(f"\n【奇门遁甲预测结果】\n推荐号码：{NumberAttributes.format_number_list(nums, dt.year)}\n推理依据：{reason}")
             return
         if re.search(r'紫微斗数', text):
             dt = datetime.now()
-            seed_str = dt.strftime("%Y%m%d%H%M%S")
+            lottery_type = get_lottery_type()
+            seed_str = dt.strftime("%Y%m%d%H%M%S") + "_" + lottery_type
             nums, reason = AncientDivination.ziwei_doushu(dt, seed_str)
             print(f"\n【紫微斗数预测结果】\n推荐号码：{NumberAttributes.format_number_list(nums, dt.year)}\n推理依据：{reason}")
             return
@@ -1168,7 +1186,8 @@ class SmartAssistant:
                 if len(draw_nums) != 7:
                     print("需要7个号码")
                     return
-                HistoryManager.add_custom_record(dt, draw_nums, "自定义")
+                lottery_type = get_lottery_type()
+                HistoryManager.add_custom_record(dt, draw_nums, "自定义", lottery_type)
                 print("自定义记录已添加。")
             except Exception as e:
                 print(f"添加失败: {e}")
@@ -1179,7 +1198,7 @@ class SmartAssistant:
 def main():
     HistoryManager.init_db()
     print("=" * 60)
-    print("彩票学习工具 - 完全确定性版（无任何随机，基于历史+日期）")
+    print("彩票学习工具 - 完全确定性版（支持彩票类型）")
     print("声明：本程序仅供个人编程学习与传统文化研究，严禁用于赌博。")
     print("=" * 60)
     while True:
@@ -1201,16 +1220,19 @@ def main():
         choice = input("请选择(0-13): ")
         current_year = datetime.now().year
         if choice == '1':
-            seed_str = datetime.now().strftime("%Y%m%d%H%M%S")
+            lottery_type = get_lottery_type()
+            seed_str = datetime.now().strftime("%Y%m%d%H%M%S") + "_" + lottery_type
             nums = BalanceFilter.generate_balanced(seed_str)
             print(f"平衡号码: {NumberAttributes.format_number_list(nums, current_year)}")
+            print(f"种子：{seed_str}")
         elif choice == '2':
             try:
                 pool = list(map(int, input("输入候选号码池（空格分隔，至少7个）: ").split()))
                 if len(pool) < 7:
                     print("候选池不足7个号码！")
                     continue
-                seed_str = datetime.now().strftime("%Y%m%d%H%M%S")
+                lottery_type = get_lottery_type()
+                seed_str = datetime.now().strftime("%Y%m%d%H%M%S") + "_" + lottery_type
                 wheel = WheelGenerator.generate(pool, pick=7, guarantee=4, seed_str=seed_str)
                 print(f"生成了 {len(wheel)} 注聪明组合：")
                 for i, w in enumerate(wheel, 1):
@@ -1222,13 +1244,15 @@ def main():
             sub = input("请输入(a/b/c): ").lower()
             draw = list(range(1,8))
             print(f"开奖号码: {NumberAttributes.format_number_list(draw, current_year)}")
+            lottery_type = get_lottery_type()
+            seed_str = datetime.now().strftime("%Y%m%d%H%M%S") + "_" + lottery_type
             if sub == 'a':
-                user = BalanceFilter.generate_balanced(datetime.now().strftime("%Y%m%d%H%M%S"))
+                user = BalanceFilter.generate_balanced(seed_str)
                 strat = "平衡选号"
             elif sub == 'b':
                 pool = list(map(int, input("输入候选号码池: ").split()))
                 if len(pool) >= 7:
-                    wheel = WheelGenerator.generate(pool, 7, 4, seed_str=datetime.now().strftime("%Y%m%d%H%M%S"))
+                    wheel = WheelGenerator.generate(pool, 7, 4, seed_str=seed_str)
                     user = wheel[0] if wheel else list(range(1,8))
                     strat = f"聪明组合(候选池{len(pool)}个)"
                 else:
@@ -1241,7 +1265,7 @@ def main():
             match_cnt = check_match(user, draw)
             prize = prize_level(match_cnt)
             print(f"匹配个数: {match_cnt} -> {prize}")
-            HistoryManager.save_record(strat, user, draw, match_cnt, prize, datetime.now())
+            HistoryManager.save_record(strat, user, draw, match_cnt, prize, datetime.now(), lottery_type)
             print("记录已保存。")
         elif choice == '4':
             print("\n--- 自定义添加历史记录 ---")
@@ -1260,7 +1284,8 @@ def main():
                 strategy = input("策略名称（回车为"自定义"）: ").strip()
                 if not strategy:
                     strategy = "自定义"
-                HistoryManager.add_custom_record(draw_dt, draw_nums, strategy)
+                lottery_type = get_lottery_type()
+                HistoryManager.add_custom_record(draw_dt, draw_nums, strategy, lottery_type)
                 print("自定义记录已添加。")
             except Exception as e:
                 print(f"错误: {e}")
@@ -1284,7 +1309,8 @@ def main():
             print("2. 时间起卦（当前时间）")
             sub = input("选择(1/2): ")
             if sub == '1':
-                seed = datetime.now().strftime("%Y%m%d%H%M%S")
+                lottery_type = get_lottery_type()
+                seed = datetime.now().strftime("%Y%m%d%H%M%S") + "_" + lottery_type
                 shang = deterministic_index(seed+"shang", 8)+1
                 xia = deterministic_index(seed+"xia", 8)+1
                 dong = deterministic_index(seed+"dong", 6)+1
@@ -1327,7 +1353,9 @@ def main():
             except:
                 print("输入无效")
         elif choice == '10':
-            DarwinPrediction.query_prediction(seed_str=datetime.now().strftime("%Y%m%d%H%M%S"))
+            lottery_type = get_lottery_type()
+            seed_str = datetime.now().strftime("%Y%m%d%H%M%S") + "_" + lottery_type
+            DarwinPrediction.query_prediction(seed_str=seed_str)
         elif choice == '11':
             AncientDivination.interactive()
         elif choice == '12':
