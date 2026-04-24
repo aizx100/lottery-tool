@@ -465,6 +465,114 @@ class HistoryManager:
         lines.append("-"*40)
         return "\n".join(lines)
 
+
+    @staticmethod
+    def batch_import_from_csv(csv_file_path, lottery_type="default", strategy="批量导入"):
+        """
+        从CSV文件批量导入历史记录
+        CSV格式要求：
+        - 第一行为表头（会被跳过）
+        - 列顺序：日期时间(YYYY-MM-DD HH:MM:SS), 号码1, 号码2, 号码3, 号码4, 号码5, 号码6, 号码7
+        - 或者：日期时间, "号码1 号码2 号码3 号码4 号码5 号码6 号码7"（空格分隔）
+        - 可选列：彩票类型, 策略（如有则使用，否则使用默认值）
+        返回：(成功数, 失败数, 错误信息列表)
+        """
+        import csv
+        success_count = 0
+        fail_count = 0
+        errors = []
+        
+        try:
+            with open(csv_file_path, 'r', encoding='utf-8-sig') as f:
+                reader = csv.reader(f)
+                header = next(reader, None)  # 跳过表头
+                
+                for line_num, row in enumerate(reader, start=2):  # 从第2行开始（第1行是表头）
+                    try:
+                        if len(row) < 2:  # 至少需要日期时间和号码
+                            errors.append(f"第{line_num}行：数据列数不足")
+                            fail_count += 1
+                            continue
+                        
+                        # 解析日期时间
+                        datetime_str = row[0].strip()
+                        try:
+                            draw_dt = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
+                        except:
+                            # 尝试其他格式
+                            try:
+                                draw_dt = datetime.strptime(datetime_str, "%Y/%m/%d %H:%M:%S")
+                            except:
+                                try:
+                                    draw_dt = datetime.strptime(datetime_str.split()[0], "%Y-%m-%d")
+                                except:
+                                    errors.append(f"第{line_num}行：日期格式错误 '{datetime_str}'")
+                                    fail_count += 1
+                                    continue
+                        
+                        # 解析号码（支持多种格式）
+                        numbers = []
+                        if len(row) >= 8:
+                            # 格式1：日期时间, 号码1, 号码2, ... 号码7
+                            numbers = []
+                            for i in range(1, 8):
+                                num_str = row[i].strip()
+                                if num_str:
+                                    try:
+                                        num = int(num_str)
+                                        if 1 <= num <= 49:
+                                            numbers.append(num)
+                                    except:
+                                        pass
+                        elif len(row) == 2:
+                            # 格式2：日期时间, "号码1 号码2 ... 号码7"
+                            num_str = row[1].strip()
+                            if num_str.startswith('"') and num_str.endswith('"'):
+                                num_str = num_str[1:-1]
+                            numbers = [int(n) for n in num_str.replace(',', ' ').split() if n.strip().isdigit()]
+                        
+                        # 验证号码
+                        if len(numbers) != 7:
+                            errors.append(f"第{line_num}行：号码数量不正确（需要7个，实际{len(numbers)}个）")
+                            fail_count += 1
+                            continue
+                        
+                        if len(set(numbers)) != 7:
+                            errors.append(f"第{line_num}行：号码有重复")
+                            fail_count += 1
+                            continue
+                        
+                        if any(n < 1 or n > 49 for n in numbers):
+                            errors.append(f"第{line_num}行：号码超出范围（1-49）")
+                            fail_count += 1
+                            continue
+                        
+                        numbers.sort()
+                        
+                        # 获取彩票类型（如果CSV中有提供）
+                        csv_lottery_type = lottery_type
+                        if len(row) > 8 and row[8].strip():
+                            csv_lottery_type = row[8].strip()
+                        
+                        # 获取策略名称（如果CSV中有提供）
+                        csv_strategy = strategy
+                        if len(row) > 9 and row[9].strip():
+                            csv_strategy = row[9].strip()
+                        
+                        # 添加到数据库
+                        HistoryManager.add_custom_record(draw_dt, numbers, csv_strategy, csv_lottery_type)
+                        success_count += 1
+                        
+                    except Exception as e:
+                        errors.append(f"第{line_num}行：处理失败 - {str(e)}")
+                        fail_count += 1
+            
+            return success_count, fail_count, errors
+            
+        except FileNotFoundError:
+            return 0, 0, [f"文件不存在：{csv_file_path}"]
+        except Exception as e:
+            return 0, 0, [f"文件读取失败：{str(e)}"]
 # ==================== 模块7：达尔文预测 ====================
 class DarwinPrediction:
     @staticmethod
@@ -1192,7 +1300,7 @@ class SmartAssistant:
             except Exception as e:
                 print(f"添加失败: {e}")
             return
-        print("抱歉，我没听懂。输入"帮助"查看支持的指令。")
+        print("抱歉，我没听懂。输入'帮助'查看支持的指令。")
 
 # ==================== 主程序 ====================
 def main():
@@ -1216,8 +1324,9 @@ def main():
         print("11. 古代术数预测（梅花/周易/奇门/紫微）")
         print("12. 智能助手（自然语言指令）")
         print("13. 智能预测员（学习所有技巧，可指定时间）")
+        print("14. 批量导入历史记录（CSV）")
         print("0. 退出")
-        choice = input("请选择(0-13): ")
+        choice = input("请选择(0-14): ")
         current_year = datetime.now().year
         if choice == '1':
             lottery_type = get_lottery_type()
@@ -1281,7 +1390,7 @@ def main():
                     print("号码无效")
                     continue
                 draw_nums.sort()
-                strategy = input("策略名称（回车为"自定义"）: ").strip()
+                strategy = input("策略名称（回车为'自定义'）: ").strip()
                 if not strategy:
                     strategy = "自定义"
                 lottery_type = get_lottery_type()
@@ -1359,7 +1468,7 @@ def main():
         elif choice == '11':
             AncientDivination.interactive()
         elif choice == '12':
-            print("\n【智能助手】请输入自然语言指令（输入"帮助"查看示例）")
+            print("\n【智能助手】请输入自然语言指令（输入'帮助'查看示例）")
             cmd = input(">>> ")
             SmartAssistant.parse_and_execute(cmd)
         elif choice == '13':
@@ -1378,6 +1487,36 @@ def main():
             else:
                 dt = datetime.now()
             SmartPredictor.predict(dt)
+        elif choice == '14':
+            print("\n--- 批量导入历史记录（CSV） ---")
+            csv_file = input("请输入CSV文件路径: ").strip()
+            if not csv_file:
+                print("文件路径不能为空")
+                continue
+            print("\n请选择彩票类型：")
+            print("1. 默认（default）")
+            print("2. 自定义输入")
+            type_opt = input("请选择(1/2): ")
+            if type_opt == '2':
+                lottery_type = input("请输入彩票类型标识符: ").strip() or "default"
+            else:
+                lottery_type = "default"
+            strategy_name = input("请输入策略名称（回车默认为'批量导入'）: ").strip()
+            if not strategy_name:
+                strategy_name = "批量导入"
+            print(f"\n正在导入文件: {csv_file}")
+            print(f"彩票类型: {lottery_type}")
+            print(f"策略名称: {strategy_name}")
+            success, fail, errors = HistoryManager.batch_import_from_csv(csv_file, lottery_type, strategy_name)
+            print(f"\n导入完成！")
+            print(f"成功: {success} 条")
+            print(f"失败: {fail} 条")
+            if errors:
+                print("\n错误详情：")
+                for err in errors[:10]:  # 只显示前10条错误
+                    print(f"  - {err}")
+                if len(errors) > 10:
+                    print(f"  ... 还有 {len(errors)-10} 条错误未显示")
         elif choice == '0':
             print("感谢学习，再见！")
             break
@@ -1386,3 +1525,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

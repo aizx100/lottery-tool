@@ -367,6 +367,129 @@ class HistoryManager:
         level_counts = dict(c.fetchall())
         conn.close()
         return total, level_counts
+    
+    @staticmethod
+    def add_custom_record(draw_datetime, draw_numbers, strategy="自定义", lottery_type="default"):
+        """添加自定义历史记录"""
+        if len(set(draw_numbers)) != 7 or any(n<1 or n>49 for n in draw_numbers):
+            raise ValueError("开奖号码必须是7个1-49之间不重复的数字")
+        
+        draw_time_str = draw_datetime.strftime("%Y-%m-%d %H:%M:%S")
+        solar_date = draw_datetime.strftime("%Y-%m-%d")
+        
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        draw_str = ','.join(map(str, draw_numbers))
+        c.execute('''INSERT INTO records (draw_time, strategy, user_numbers, draw_numbers, match_count, prize_level, solar_date, lunar_date, ganzhi, nayin, zhishen, jianchu, main_hexagram, changing_hexagram, hour_ganzhi, lottery_type)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                  (draw_time_str, strategy, "", draw_str, 0, "无", solar_date, "", "", "", "", "", "", "", "", lottery_type))
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def batch_import_from_csv(csv_file, lottery_type="default", strategy="批量导入"):
+        """
+        从CSV文件批量导入历史记录（Streamlit版本）
+        CSV格式：第一行为表头，之后每行为日期时间, 号码1, 号码2, ..., 号码7
+        返回：(成功数, 失败数, 错误信息列表)
+        """
+        import csv
+        from io import StringIO
+        
+        success_count = 0
+        fail_count = 0
+        errors = []
+        
+        try:
+            # 如果是字符串，转为StringIO
+            if isinstance(csv_file, str):
+                csv_content = StringIO(csv_file)
+            else:
+                csv_content = StringIO(csv_file.getvalue().decode('utf-8-sig'))
+            
+            reader = csv.reader(csv_content)
+            header = next(reader, None)  # 跳过表头
+            
+            for line_num, row in enumerate(reader, start=2):
+                try:
+                    if len(row) < 2:
+                        errors.append(f"第{line_num}行：数据列数不足")
+                        fail_count += 1
+                        continue
+                    
+                    # 解析日期时间
+                    datetime_str = row[0].strip()
+                    try:
+                        draw_dt = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
+                    except:
+                        try:
+                            draw_dt = datetime.strptime(datetime_str, "%Y/%m/%d %H:%M:%S")
+                        except:
+                            try:
+                                draw_dt = datetime.strptime(datetime_str.split()[0], "%Y-%m-%d")
+                            except:
+                                errors.append(f"第{line_num}行：日期格式错误 '{datetime_str}'")
+                                fail_count += 1
+                                continue
+                    
+                    # 解析号码
+                    numbers = []
+                    if len(row) >= 8:
+                        numbers = []
+                        for i in range(1, 8):
+                            num_str = row[i].strip()
+                            if num_str:
+                                try:
+                                    num = int(num_str)
+                                    if 1 <= num <= 49:
+                                        numbers.append(num)
+                                except:
+                                    pass
+                    elif len(row) == 2:
+                        num_str = row[1].strip()
+                        if num_str.startswith('"') and num_str.endswith('"'):
+                            num_str = num_str[1:-1]
+                        numbers = [int(n) for n in num_str.replace(',', ' ').split() if n.strip().isdigit()]
+                    
+                    # 验证号码
+                    if len(numbers) != 7:
+                        errors.append(f"第{line_num}行：号码数量不正确（需要7个，实际{len(numbers)}个）")
+                        fail_count += 1
+                        continue
+                    
+                    if len(set(numbers)) != 7:
+                        errors.append(f"第{line_num}行：号码有重复")
+                        fail_count += 1
+                        continue
+                    
+                    if any(n < 1 or n > 49 for n in numbers):
+                        errors.append(f"第{line_num}行：号码超出范围（1-49）")
+                        fail_count += 1
+                        continue
+                    
+                    numbers.sort()
+                    
+                    # 获取彩票类型和策略（如果CSV中有提供）
+                    csv_lottery_type = lottery_type
+                    if len(row) > 8 and row[8].strip():
+                        csv_lottery_type = row[8].strip()
+                    
+                    csv_strategy = strategy
+                    if len(row) > 9 and row[9].strip():
+                        csv_strategy = row[9].strip()
+                    
+                    # 添加到数据库
+                    HistoryManager.add_custom_record(draw_dt, numbers, csv_strategy, csv_lottery_type)
+                    success_count += 1
+                    
+                except Exception as e:
+                    errors.append(f"第{line_num}行：处理失败 - {str(e)}")
+                    fail_count += 1
+            
+            return success_count, fail_count, errors
+            
+        except Exception as e:
+            return 0, 0, [f"文件读取失败：{str(e)}"]
 
 # ==================== 模块7：古代术数预测（完全确定性） ====================
 class AncientDivination:
@@ -507,9 +630,9 @@ def main():
     st.sidebar.markdown(f"**种子：** `{seed_str}`")
     
     # 功能选项卡
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🔢 平衡选号", "🎯 聪明组合", "📜 黄历查询", 
-        "☯️ 易经起卦", "🔮 古代术数", "📊 历史记录"
+        "☯️ 易经起卦", "🔮 古代术数", "📊 历史记录", "📥 批量导入"
     ])
     
     # Tab 1: 平衡选号
@@ -659,6 +782,59 @@ def main():
                         st.markdown(f"**农历：** {lunar}")
         else:
             st.info("暂无历史记录")
+    
+    # Tab 7: 批量导入
+    with tab7:
+        st.header("📥 批量导入历史记录（CSV）")
+        st.markdown("""
+        **CSV文件格式要求：**
+        - 第一行为表头（会被跳过）
+        - 每行格式：日期时间, 号码1, 号码2, 号码3, 号码4, 号码5, 号码6, 号码7
+        - 日期时间格式：YYYY-MM-DD HH:MM:SS 或 YYYY/MM/DD HH:MM:SS 或 YYYY-MM-DD
+        - 可选列：彩票类型, 策略（在第8、9列）
+        
+        **示例：**
+        ```
+        日期时间,号码1,号码2,号码3,号码4,号码5,号码6,号码7,彩票类型,策略
+        2026-04-20 20:30:00,5,12,18,22,33,41,45,双色球,官方开奖
+        2026-04-21 21:00:00,3,8,15,26,37,42,49,default,测试数据
+        ```
+        """)
+        
+        # 文件上传
+        uploaded_file = st.file_uploader("选择CSV文件", type=['csv'], key="csv_uploader")
+        
+        # 导入设置
+        col1, col2 = st.columns(2)
+        with col1:
+            import_lottery_type = st.text_input("彩票类型（默认）", value="default", key="import_lottery_type")
+        with col2:
+            import_strategy = st.text_input("策略名称（默认）", value="批量导入", key="import_strategy")
+        
+        # 导入按钮
+        if st.button("开始导入", key="import_btn"):
+            if uploaded_file is not None:
+                with st.spinner("正在导入..."):
+                    success, fail, errors = HistoryManager.batch_import_from_csv(
+                        uploaded_file, 
+                        import_lottery_type, 
+                        import_strategy
+                    )
+                
+                # 显示结果
+                st.success(f"导入完成！成功: {success} 条，失败: {fail} 条")
+                
+                if errors:
+                    with st.expander("查看错误详情", expanded=True):
+                        for err in errors[:20]:  # 显示前20条错误
+                            st.error(err)
+                        if len(errors) > 20:
+                            st.warning(f"还有 {len(errors)-20} 条错误未显示")
+            else:
+                st.warning("请先选择CSV文件")
+        
+        st.markdown("---")
+        st.markdown("💡 **提示：** 导入的记录将用于达尔文预测和智能预测员的学习分析")
     
     # 底部说明
     st.markdown("---")
